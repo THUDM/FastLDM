@@ -29,5 +29,14 @@ print('trt engine', benchmark_trt('origin.trt', inputs_h, 100))
 # os.system("torchtrtc origin.trt origin.ts --embed-engine --device-type=gpu")
 
 import torch_tensorrt
+
+model = tsmodel.eval()
+inputs = [timesteps.type(torch.int32), max_period.type(torch.int32)]
+enabled_precisions = {torch.float, torch.half}
+trt_ts_module = torch_tensorrt.compile(
+    model, inputs=inputs, enabled_precisions=enabled_precisions
+)
+print('torchtrt_compile', benchmark(trt_ts_module, inputs, {}, 100))
+
 model = torch.jit.load('origin.ts')
 print('torchtrt', benchmark(model, (timesteps.type(torch.int32), max_period.type(torch.int32)), {}, 100))

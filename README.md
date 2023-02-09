@@ -4,8 +4,9 @@ We focus on inference speed-up for [ldm](https://github.com/CompVis/stable-diffu
 
 ## TensorRT
 
-## FlashAttentioin
+We are now trying to convert model of stable-diffusion into an optimized TensorRT engine.
 
-## AIT
+* `test.py` is about timestep embedding transformation.
+* `test_plugin.py` is about attention plugin transformation.
 
-## Triton
+Codes are not tidy yet.

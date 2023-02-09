@@ -3,7 +3,7 @@ import torch
 import numpy as np
 from tqdm import tqdm
 
-def benchmark(model, inputs, kwargs, n_iter, func_name=None, warmup_step=5):
+def benchmark(model, inputs, kwargs, n_iter, func_name=None, warmup_step=5, return_output=False):
     if hasattr(model, 'eval') and callable(model.eval):
         model.eval()
         print('eval mode...')
@@ -28,7 +28,11 @@ def benchmark(model, inputs, kwargs, n_iter, func_name=None, warmup_step=5):
             assert outputs is not None
             time_list.append(end_time - start_time)
     times = np.array(time_list)
-    return {'average': times.mean(), 'min': times.min()}
+    measurements = {'average': times.mean(), 'min': times.min()}
+    if return_output:
+        return measurements, outputs
+    else:
+        return measurements
 
 import numpy as np
 import os
