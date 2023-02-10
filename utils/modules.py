@@ -26,7 +26,7 @@ class CustomQKVToContextPluginDynamic(torch.autograd.Function):
         return result
     @staticmethod
     def symbolic(g, qkv, hidden_size, num_heads):
-        return g.op("CustomQKVToContextPluginDynamic", qkv, plugin_version_s='1', type_id_i=0, hidden_size_i=hidden_size, num_heads_i=num_heads, has_mask_i=False)
+        return g.op("CustomQKVToContextPluginDynamic", qkv, plugin_version_s='1', type_id_i=1, hidden_size_i=hidden_size, num_heads_i=num_heads, has_mask_i=False)
 
 class qkvLinearSlow(nn.Module):
     def __init__(self, hidden_size, num_heads):
@@ -70,3 +70,28 @@ class qkvLinear(nn.Module):
 
     def forward(self, x):
         return self.Wqkv(x).view(x.size(0), x.size(1), 3*self.hidden_size, 1, 1)
+
+from flash_attn.flash_attn_interface import _flash_attn_forward
+class FlashSelfAttn(nn.Module):
+    def __init__(self, hidden_size, num_heads, Wq=None, Wk=None, Wv=None):
+        super().__init__()
+        assert hidden_size % num_heads == 0
+        self.hidden_size = hidden_size
+        self.num_heads = num_heads
+        self.size_per_head = hidden_size // num_heads
+        self.scale = 1 / self.size_per_head**0.5
+        self.projection = qkvLinear(hidden_size, num_heads, Wq=Wq, Wk=Wk, Wv=Wv)
+    def forward(self, x):
+        # shape of x (seq_len, batch_size, hidden_size)
+        # shape of i_mask (batch_size)
+        # output (seq_len, batch_size, hidden_size)
+        seq_len = x.size(0)
+        batch_size = x.size(1)
+        qkv = self.projection(x).view(seq_len, batch_size, self.num_heads, 3, self.size_per_head).transpose(0, 1).contiguous().view(seq_len*batch_size, self.num_heads, 3, self.size_per_head)
+        q = qkv.select(-2, 0)
+        k = qkv.select(-2, 1)
+        v = qkv.select(-2, 2)
+        cu_seqlen = torch.arange(start=0, end=batch_size*seq_len, step=seq_len, dtype=torch.int32, device=q.device)
+        max_seqlen = seq_len
+        out = torch.empty_like(v)
+        return _flash_attn_forward(q, k, v, out, cu_seqlen, cu_seqlen, max_seqlen, max_seqlen, 0., self.scale, False, False)[0]

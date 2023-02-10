@@ -3,7 +3,7 @@ import torch
 import numpy as np
 from tqdm import tqdm
 
-def benchmark(model, inputs, kwargs, n_iter, func_name=None, warmup_step=5, return_output=False):
+def benchmark(model, inputs, kwargs, n_iter, func_name=None, warmup_step=5):
     if hasattr(model, 'eval') and callable(model.eval):
         model.eval()
         print('eval mode...')
@@ -29,10 +29,7 @@ def benchmark(model, inputs, kwargs, n_iter, func_name=None, warmup_step=5, retu
             time_list.append(end_time - start_time)
     times = np.array(time_list)
     measurements = {'average': times.mean(), 'min': times.min()}
-    if return_output:
-        return measurements, outputs
-    else:
-        return measurements
+    return measurements, outputs
 
 import numpy as np
 import os
@@ -68,16 +65,18 @@ def benchmark_trt(engine_path, inputs_dict, n_iter, warmup_step=5):
             outputs_h[binding] = cuda.pagelocked_empty(shape, dtype)
             outputs_d[binding] = cuda.mem_alloc(outputs_h[binding].nbytes)
             bindings.append(int(outputs_d[binding]))
+    stream = cuda.Stream()
+    for k in inputs_h:
+        cuda.memcpy_htod_async(inputs_d[k], inputs_h[k], stream)
+    stream.synchronize()
     def func():
-        stream = cuda.Stream()
-        for k in inputs_h:
-            cuda.memcpy_htod_async(inputs_d[k], inputs_h[k], stream)
-        # stream.synchronize()
-        # from utils import benchmark
-        # print(benchmark(context, (), {'bindings': bindings, 'stream_handle':stream.handle}, 100, 'execute_async_v2'))
-        context.execute_async_v2(bindings=bindings, stream_handle=stream.handle)
-        for k in outputs_d:
-            cuda.memcpy_dtoh_async(outputs_h[k], outputs_d[k], stream)
+        state = context.execute_async_v2(bindings=bindings, stream_handle=stream.handle)
         stream.synchronize()
-        return outputs_h
-    return benchmark(func, (), {}, n_iter, warmup_step=warmup_step)
+        return state
+    # measurement, _ = benchmark(context, (), {'bindings': bindings, 'stream_handle':stream.handle}, n_iter, func_name='execute_async_v2', warmup_step=warmup_step)
+    measurement, state = benchmark(func, (), {}, n_iter, warmup_step=warmup_step)
+    assert state is True
+    for k in outputs_d:
+        cuda.memcpy_dtoh_async(outputs_h[k], outputs_d[k], stream)
+    stream.synchronize()
+    return measurement, outputs_h
