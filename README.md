@@ -9,4 +9,8 @@ We are now trying to convert model of stable-diffusion into an optimized TensorR
 * `test.py` is about timestep embedding transformation.
 * `test_plugin.py` is about attention plugin transformation.
 
-Codes are not tidy yet.
+Code structure:
+
+* We provide parameter mapping functions from a module to another one in utils.mapping
+* We provide TensorRT-friendly modules in utils.modules
+* We provide benchmarking functions in utils.benchmark
