@@ -14,3 +14,5 @@ Code structure:
 * We provide parameter mapping functions from a module to another one in utils.mapping
 * We provide TensorRT-friendly modules in utils.modules
 * We provide benchmarking functions in utils.benchmark
+* We provide experiment functions to compare different implemented models with same interface
+

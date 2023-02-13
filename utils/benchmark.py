@@ -36,6 +36,7 @@ import tensorrt as trt
 from torch.testing._internal.common_utils import numpy_to_torch_dtype_dict
 
 TRT_LOGGER = trt.Logger()
+trt.init_libnvinfer_plugins(TRT_LOGGER, '')
 
 def load_engine(engine_file_path):
     assert os.path.exists(engine_file_path)
@@ -60,7 +61,7 @@ def benchmark_trt(engine_path, inputs_dict, n_iter, warmup_step=5):
             bindings.append(int(outputs_dict[binding].data_ptr()))
     stream = torch.cuda.Stream()
     def func():
-        state = context.execute_async_v2(bindings=bindings, stream_handle=stream.cuda_stream)#stream.handle)
+        state = context.execute_async_v2(bindings=bindings, stream_handle=stream.cuda_stream)
         stream.synchronize()
         return state
     measurement, state = benchmark(func, (), {}, n_iter, warmup_step=warmup_step)

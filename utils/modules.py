@@ -16,7 +16,7 @@ class CustomQKVToContextPluginDynamic(torch.autograd.Function):
         q = qkv.select(-2, 0)
         k = qkv.select(-2, 1)
         v = qkv.select(-2, 2) # (num_heads, batch_size, seq_len, size_per_head)
-        scores = torch.matmul(q, k.transpose(-2, -1)) / (size_per_head**0.5)
+        scores = torch.matmul(q, k.transpose(-2, -1)) * (size_per_head**-0.5)
         scores = F.softmax(scores, -1)
         result = torch.matmul(scores, v).transpose(0, 2).contiguous().view(seq_len, batch_size, hidden_size, 1, 1)
         return result
@@ -95,3 +95,138 @@ class FlashSelfAttn(nn.Module):
         max_seqlen = seq_len
         out = torch.empty_like(v)
         return _flash_attn_forward(q, k, v, out, cu_seqlen, cu_seqlen, max_seqlen, max_seqlen, 0., self.scale, False, False)[0].view(seq_len, batch_size, self.hidden_size)
+
+from torch.nn import MultiheadAttention
+class TorchSelfAttn(nn.Module):
+    def __init__(self, hidden_size, num_heads):
+        super().__init__()
+        self.mha = MultiheadAttention(hidden_size, num_heads)
+    def forward(self, x):
+        return self.mha(x, x, x)[0]
+
+class fMHCA(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, q, kv):
+        """
+        q: (batch_size, seq_len, num_head, size_per_head)
+        kv: (batch_size, seq_len, num_head, 2, size_per_head)
+        output: like q
+        """
+        size_per_head = q.size(3)
+        batch_size = q.size(0)
+        seq_len = q.size(1)
+        num_head = q.size(2)
+        q = q.transpose(1, 2).contiguous()
+        kv = kv.transpose(1, 2).contiguous()
+        k = kv.select(-2, 0)
+        v = kv.select(-2, 1)
+        scores = torch.matmul(q, k.transpose(-2, -1)) * (size_per_head**-0.5)
+        scores = F.softmax(scores, -1)
+        result = torch.matmul(scores, v).transpose(1, 2).contiguous().view(batch_size, seq_len, num_head, size_per_head)
+        return result
+    @staticmethod
+    def symbolic(g, q, kv):
+        return g.op("fMHCA", q, kv, plugin_version_s='1')
+
+from einops import rearrange
+class ldmCrossAttn(nn.Module):
+    def __init__(self, query_dim, context_dim=None, heads=8, dim_head=40):
+        super().__init__()
+        inner_dim = dim_head * heads
+        if context_dim is None:
+            context_dim = query_dim
+
+        self.scale = dim_head ** -0.5
+        self.heads = heads
+
+        self.to_q = nn.Linear(query_dim, inner_dim, bias=False)
+        self.to_k = nn.Linear(context_dim, inner_dim, bias=False)
+        self.to_v = nn.Linear(context_dim, inner_dim, bias=False)
+
+        self.to_out = nn.Sequential(nn.Linear(inner_dim, query_dim))
+
+    def forward(self, x, context=None):
+        """
+        x: (batch_size, seq_len_q, query_dim)
+        context: (batch_size, seq_len_kv, context_dim)
+        out: (batch_size, seq_len, seq_len_q, query_dim)
+        """
+        h = self.heads
+
+        q = self.to_q(x)
+        if context is None:
+            context = x
+        k = self.to_k(context)
+        v = self.to_v(context)
+
+        q = rearrange(q, 'b n (h d) -> b n h d', h=h)
+        k = rearrange(k, 'b n (h d) -> b n h 1 d', h=h)
+        v = rearrange(v, 'b n (h d) -> b n h 1 d', h=h)
+        kv = torch.cat([k, v], dim=-2)
+
+        out = fMHCA.apply(q, kv)
+        out = rearrange(out, 'b n h d -> b n (h d)', h=h)
+        return self.to_out(out)
+
+class fMHA_V2(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, qkv):
+        """
+        qkv: (batch_size, seq_len, num_head, 3, size_per_head)
+        output: (batch_size, seq_len, num_head, size_per_head)
+        """
+        size_per_head = qkv.size(4)
+        batch_size = qkv.size(0)
+        seq_len = qkv.size(1)
+        num_head = qkv.size(2)
+        qkv = qkv.transpose(1, 2).contiguous()
+        q = qkv.select(-2, 0)
+        k = qkv.select(-2, 1)
+        v = qkv.select(-2, 2)
+        scores = torch.matmul(q, k.transpose(-2, -1)) * (size_per_head**-0.5)
+        scores = F.softmax(scores, -1)
+        result = torch.matmul(scores, v).transpose(1, 2).contiguous().view(batch_size, seq_len, num_head, size_per_head)
+        return result
+    @staticmethod
+    def symbolic(g, qkv):
+        return g.op("fMHA_V2", qkv, plugin_version_s='1')
+
+from einops import rearrange
+class ldmSelfAttn(nn.Module):
+    def __init__(self, query_dim, context_dim=None, heads=8, dim_head=40):
+        super().__init__()
+        inner_dim = dim_head * heads
+        if context_dim is None:
+            context_dim = query_dim
+
+        self.scale = dim_head ** -0.5
+        self.heads = heads
+
+        self.to_q = nn.Linear(query_dim, inner_dim, bias=False)
+        self.to_k = nn.Linear(context_dim, inner_dim, bias=False)
+        self.to_v = nn.Linear(context_dim, inner_dim, bias=False)
+
+        self.to_out = nn.Sequential(nn.Linear(inner_dim, query_dim))
+
+    def forward(self, x, context=None):
+        """
+        x: (batch_size, seq_len_q, query_dim)
+        context: (batch_size, seq_len_kv, context_dim)
+        out: (batch_size, seq_len, seq_len_q, query_dim)
+        """
+        h = self.heads
+
+        q = self.to_q(x)
+        if context is None:
+            context = x
+        k = self.to_k(context)
+        v = self.to_v(context)
+
+        q = rearrange(q, 'b n (h d) -> b n h 1 d', h=h)
+        k = rearrange(k, 'b n (h d) -> b n h 1 d', h=h)
+        v = rearrange(v, 'b n (h d) -> b n h 1 d', h=h)
+        qkv = torch.cat([q, k, v], dim=-2)
+
+        out = fMHA_V2.apply(qkv)
+        out = rearrange(out, 'b n h d -> b n (h d)', h=h)
+        return self.to_out(out)
