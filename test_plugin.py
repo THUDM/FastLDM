@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 from utils.mapping import MAPPING
 from utils.experiment import generate_trt, experiment
-import os
 
 def experiment_self_attn():
     from utils.modules import qkvLinearSlow, TRTSelfAttn, FlashSelfAttn, TorchSelfAttn
@@ -47,8 +46,7 @@ def experiment_flash_attn():
     x = torch.randn(2, 4096, 320).half().cuda()
     model = ldmSelfAttn(320, heads=8, dim_head=40).half()
     ldm_model = CrossAttention(320, heads=8, dim_head=40).half()
-    for src, dst in zip(model.parameters(), ldm_model.parameters()):
-        dst.data = src.data
+    MAPPING.get(None, None)(model, ldm_model)
     model = model.cuda()
     ldm_model = ldm_model.cuda()
     trt_name = generate_trt(model, (x,))
@@ -64,8 +62,7 @@ def experiment_ldm_crossattn():
     context = torch.randn(2, 77, 768).cuda()
     model = ldmCrossAttn(320, context_dim=768, heads=8, dim_head=40)
     ldm_model = CrossAttention(320, context_dim=768, heads=8, dim_head=40)
-    for src, dst in zip(model.parameters(), ldm_model.parameters()):
-        dst.data = src.data
+    MAPPING.get(None, None)(model, ldm_model)
     model = model.cuda()
     ldm_model = ldm_model.cuda()
     trt_name = generate_trt(model, (x, context))
@@ -87,7 +84,6 @@ def experiment_var():
 
 
 if __name__ == '__main__':
-    os.makedirs('./trt/', exist_ok=True)
     # experiment_self_attn()
     # experiment_var()
     # experiment_ldm_crossattn()

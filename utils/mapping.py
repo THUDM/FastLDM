@@ -3,6 +3,11 @@ import torch
 
 MAPPING = Registry('mapping')
 
+@MAPPING.register(type(None), type(None))
+def mapping_default(src, dst):
+    for s, d in zip(src.parameters(), dst.parameters()):
+        d.data = s.data
+
 from .modules import qkvLinearSlow, qkvLinear
 @MAPPING.register(qkvLinearSlow, qkvLinear)
 def mapping_qkv_linear(src, dst):
