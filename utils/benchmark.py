@@ -31,18 +31,9 @@ def benchmark(model, inputs, kwargs, n_iter, func_name=None, warmup_step=5):
     measurements = {'average': times.mean(), 'min': times.min()}
     return measurements, outputs
 
-import os
+from .helper import load_engine
 import tensorrt as trt
 from torch.testing._internal.common_utils import numpy_to_torch_dtype_dict
-
-TRT_LOGGER = trt.Logger()
-trt.init_libnvinfer_plugins(TRT_LOGGER, '')
-
-def load_engine(engine_file_path):
-    assert os.path.exists(engine_file_path)
-    print("Reading engine from file {}".format(engine_file_path))
-    with open(engine_file_path, "rb") as f, trt.Runtime(TRT_LOGGER) as runtime:
-        return runtime.deserialize_cuda_engine(f.read())
 
 def benchmark_trt(engine_path, inputs_dict, n_iter, warmup_step=5):
     engine = load_engine(engine_path)
@@ -59,7 +50,7 @@ def benchmark_trt(engine_path, inputs_dict, n_iter, warmup_step=5):
             shape = tuple(context.get_binding_shape(binding_idx))
             outputs_dict[binding] = torch.empty(*shape, dtype=numpy_to_torch_dtype_dict[dtype], device='cuda')
             bindings.append(int(outputs_dict[binding].data_ptr()))
-    stream = torch.cuda.Stream()
+    stream = torch.cuda.default_stream()
     def func():
         state = context.execute_async_v2(bindings=bindings, stream_handle=stream.cuda_stream)
         stream.synchronize()
@@ -69,9 +60,9 @@ def benchmark_trt(engine_path, inputs_dict, n_iter, warmup_step=5):
     return measurement, outputs_dict
 
 
-import pycuda.driver as cuda
-import pycuda.autoinit
 def benchmark_trt_np(engine_path, inputs_dict, n_iter, warmup_step=5):
+    import pycuda.driver as cuda
+    import pycuda.autoinit
     engine = load_engine(engine_path)
     context = engine.create_execution_context()
     inputs_h = inputs_dict

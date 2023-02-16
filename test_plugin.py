@@ -16,7 +16,7 @@ def experiment_self_attn():
     th_model = TorchSelfAttn(768, 8)
     MAPPING.get(lin, th_model.mha)(lin, th_model.mha)
     th_model = th_model.cuda().half()
-    trt_name = generate_trt(model, (x,))
+    _, trt_name = generate_trt(model, (x,))
     measure_dict, var, outputs_dict = experiment([model, flash, th_model], [trt_name], (x,))
     for k in measure_dict:
         print(k, measure_dict[k])
@@ -33,7 +33,7 @@ def experiment_ldm_attn(seq_len):
     #     dst.data = src.data
     model = model.cuda()
     # ldm_model = ldm_model.cuda()
-    trt_name = generate_trt(model, (x,))
+    _, trt_name = generate_trt(model, (x,))
     measure_dict, var, outputs_dict = experiment([model], [trt_name], (x,))
     # for k in measure_dict:
     #     print(k, measure_dict[k])
@@ -49,7 +49,7 @@ def experiment_flash_attn():
     MAPPING.get(None, None)(model, ldm_model)
     model = model.cuda()
     ldm_model = ldm_model.cuda()
-    trt_name = generate_trt(model, (x,))
+    _, trt_name = generate_trt(model, (x,))
     measure_dict, var, outputs_dict = experiment([model, ldm_model], [trt_name], (x,))
     for k in measure_dict:
         print(k, measure_dict[k])
@@ -65,7 +65,7 @@ def experiment_ldm_crossattn():
     MAPPING.get(None, None)(model, ldm_model)
     model = model.cuda()
     ldm_model = ldm_model.cuda()
-    trt_name = generate_trt(model, (x, context))
+    _, trt_name = generate_trt(model, (x, context))
     measure_dict, var, outputs_dict = experiment([model, ldm_model], [trt_name], (x, context))
     for k in measure_dict:
         print(k, measure_dict[k])

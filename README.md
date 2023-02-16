@@ -16,3 +16,4 @@ We provide:
 * benchmarking functions in utils.benchmark
 * experiment functions to compare different implemented models with same interface
 
+We recommend to run scripts using CUDA_VISIBLE_DEVICES=0,1 (or any other devices not less than 2), because TensorRT will constantly use cuda:0. We should leave as much space as possible for TensorRT, so we'd better use cuda:1 in pytorch.

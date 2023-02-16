@@ -163,3 +163,11 @@ class ldmSelfAttn(nn.Module):
         out = fMHA_V2.apply(qkv)
         out = rearrange(out, 'b n h d -> b n (h d)', h=h)
         return self.to_out(out)
+    
+from ldm.modules.diffusionmodules.util import timestep_embedding
+class TSModule(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.dim = dim
+    def forward(self, timesteps):
+        return timestep_embedding(timesteps, self.dim)

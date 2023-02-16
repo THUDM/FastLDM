@@ -41,7 +41,7 @@ input_0 = torch.randn(6, 4, 64, 64, dtype=torch.float32).cuda()
 input_1 = torch.tensor([1, 3, 7, 8, 9, 23], dtype=torch.int32).cuda()
 input_2 = torch.randn(6, 77, 768, dtype=torch.float32).cuda()
 from utils.experiment import generate_trt, experiment
-trt_name = generate_trt(unet, (input_0, input_1, input_2))
+_, trt_name = generate_trt(unet, (input_0, input_1, input_2))
 measure_dict, var, outputs_dict = experiment([model], [trt_name], (input_0, input_1, input_2))
 for k in measure_dict:
     print(k, measure_dict[k])
