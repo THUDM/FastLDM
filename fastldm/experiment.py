@@ -22,36 +22,37 @@ def generate_trt(model, inputs, kw_args={}, experiment_name='', onnx_only=False)
     os.system("trtexec --onnx=onnx/{}.onnx --saveEngine=trt/{}.trt --fp16 --buildOnly".format(name, name))
     return 'onnx/{}.onnx'.format(name), 'trt/{}.trt'.format(name)
 
-def experiment(models, trt_models, inputs, kw_args={}, n_iter=100):
+def experiment(models, trt_models, inputs, kw_args={}, n_iter=100, warm_up_step=5):
     measure_dict = OrderedDict()
     outputs_dict = OrderedDict()
+    len_out = 0
     for model in models:
         name = type(model).__name__
-        measure, outputs = benchmark(model, inputs, kw_args, n_iter)
+        measure, outputs = benchmark(model, inputs, kw_args, n_iter, warmup_step=warm_up_step)
+        if type(outputs) is not tuple and type(outputs) is not list:
+            outputs = [outputs]
         measure_dict[name] = measure
         outputs_dict[name] = outputs
-    inputs_h = {'input_{}'.format(i): inputs[i] for i in range(len(inputs))}
+        len_out = len(outputs)
+    inputs_h = {'input_{}'.format(i): inputs[i].to('cuda:0') for i in range(len(inputs))}
     shift = len(inputs)
     for k in kw_args:
-        inputs_h['input_{}'.format(shift)] = kw_args[k]
+        inputs_h['input_{}'.format(shift)] = kw_args[k].to('cuda:0')
         shift += 1
     for trt in trt_models:
-        measure, outputs = benchmark_trt(trt, inputs_h, n_iter)
+        measure, outputs = benchmark_trt(trt, inputs_h, n_iter, warmup_step=warm_up_step)
         measure_dict[trt] = measure
         outputs = [outputs['output_{}'.format(i)] for i in range(len(outputs))]
-        if len(outputs) == 1:
-            outputs = outputs[0]
         outputs_dict[trt] = outputs
+        len_out = len(outputs)
     num = len(outputs_dict)
-    var = np.zeros((num, num))
+    var = np.zeros((len_out, num, num))
     for i, k1 in enumerate(outputs_dict):
         for j, k2 in enumerate(outputs_dict):
             if i == j:
                 continue
-            ma = 0.
-            for o1, o2 in zip(outputs_dict[k1], outputs_dict[k2]):
-                ma = max(ma, (o1.cpu()-o2.cpu()).abs().max().item())
-            var[i, j] = ma
+            for k, (o1, o2) in enumerate(zip(outputs_dict[k1], outputs_dict[k2])):
+                var[k, i, j] = (o1.cpu().type(torch.float32)-o2.cpu().type(torch.float32)).abs().max().item()
     return measure_dict, var, outputs_dict
 
 def experiment_onnx(model, inputs, kw_args={}, new_inputs=None, new_kw_args=None):
@@ -61,7 +62,7 @@ def experiment_onnx(model, inputs, kw_args={}, new_inputs=None, new_kw_args=None
         new_inputs = inputs
     if new_kw_args is None:
         new_kw_args = kw_args
-    return experiment([model, ortmodel], [], new_inputs, kw_args=new_kw_args, n_iter=1)
+    return experiment([model, ortmodel], [], new_inputs, kw_args=new_kw_args, n_iter=1, warm_up_step=0)
 
 def experiment_onnx_trt(model, inputs, kw_args={}, new_inputs=None, new_kw_args=None):
     onnx_path, trt_path = generate_trt(model, inputs, kw_args=kw_args)
@@ -71,4 +72,4 @@ def experiment_onnx_trt(model, inputs, kw_args={}, new_inputs=None, new_kw_args=
         new_inputs = inputs
     if new_kw_args is None:
         new_kw_args = kw_args
-    return experiment([model, ortmodel, trtmodel], [], new_inputs, kw_args=new_kw_args, n_iter=1)
+    return experiment([model, ortmodel, trtmodel], [], new_inputs, kw_args=new_kw_args, n_iter=1, warm_up_step=0)

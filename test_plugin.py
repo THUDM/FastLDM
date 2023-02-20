@@ -1,10 +1,10 @@
 import torch
 import torch.nn as nn
-from utils.mapping import MAPPING
-from utils.experiment import generate_trt, experiment
+from fastldm.mapping import MAPPING
+from fastldm.experiment import generate_trt, experiment
 
 def experiment_self_attn():
-    from utils.modules import qkvLinearSlow, TRTSelfAttn, FlashSelfAttn, TorchSelfAttn
+    from fastldm.modules import qkvLinearSlow, TRTSelfAttn, FlashSelfAttn, TorchSelfAttn
     x = torch.randn(512, 2, 768).cuda().half() # seq_len 128 bug
     lin = qkvLinearSlow(768, 8)
     model = TRTSelfAttn(768, 8)
@@ -23,7 +23,7 @@ def experiment_self_attn():
     print(var)
 
 def experiment_ldm_attn(seq_len):
-    from utils.modules import ldmSelfAttn, ldmCrossAttn
+    from fastldm.modules import ldmSelfAttn, ldmCrossAttn
     from ldm.modules.attention import CrossAttention
     x = torch.randn(2, seq_len, 320).half().cuda()
     # model = ldmSelfAttn(320, heads=8, dim_head=40).half()
@@ -41,7 +41,7 @@ def experiment_ldm_attn(seq_len):
     return var[0, 1]
 
 def experiment_flash_attn():
-    from utils.modules import ldmSelfAttn
+    from fastldm.modules import ldmSelfAttn
     from ldm.modules.attention import CrossAttention
     x = torch.randn(2, 4096, 320).half().cuda()
     model = ldmSelfAttn(320, heads=8, dim_head=40).half()
@@ -56,7 +56,7 @@ def experiment_flash_attn():
     print(var)
 
 def experiment_ldm_crossattn():
-    from utils.modules import ldmCrossAttn
+    from fastldm.modules import ldmCrossAttn
     from ldm.modules.attention import CrossAttention
     x = torch.randn(2, 4096, 320).cuda()
     context = torch.randn(2, 77, 768).cuda()
