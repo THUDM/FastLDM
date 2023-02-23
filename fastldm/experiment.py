@@ -4,7 +4,7 @@ from .benchmark import benchmark, benchmark_trt
 import numpy as np
 from collections import OrderedDict
 import torch
-from .helper import ORTModule, TRTModule
+from .helper import ORTModule, TRTModule, list_or_tuple
 
 def generate_trt(model, inputs, kw_args={}, experiment_name='', onnx_only=False):
     os.makedirs('./onnx/', exist_ok=True)
@@ -29,7 +29,7 @@ def experiment(models, trt_models, inputs, kw_args={}, n_iter=100, warm_up_step=
     for model in models:
         name = type(model).__name__
         measure, outputs = benchmark(model, inputs, kw_args, n_iter, warmup_step=warm_up_step)
-        if type(outputs) is not tuple and type(outputs) is not list:
+        if not list_or_tuple(outputs):
             outputs = [outputs]
         measure_dict[name] = measure
         outputs_dict[name] = outputs

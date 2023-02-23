@@ -30,3 +30,10 @@ def mapping_qkv_linear_mha(src, dst):
     dst.in_proj_bias.data = torch.cat([src.Wq.bias.data, src.Wk.bias.data, src.Wv.bias.data])
     dst.out_proj.weight.data = torch.eye(dst.out_proj.weight.data.shape[0], dtype=dst.out_proj.weight.data.dtype, device=dst.out_proj.weight.data.device)
     dst.out_proj.bias.data = torch.zeros(dst.out_proj.bias.data.shape[0], dtype=dst.out_proj.bias.data.dtype, device=dst.out_proj.bias.data.device)
+
+from torch.nn import Conv2d
+from .modules import LinearConv
+@MAPPING.register(Conv2d, LinearConv)
+def mapping_linear_conv(src, dst):
+    dst.linear.weight.data = src.weight.data[...,0,0]
+    dst.linear.bias.data = src.bias.data

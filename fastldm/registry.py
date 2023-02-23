@@ -13,5 +13,7 @@ class Registry:
         if not isinstance(dst, type):
             dst = type(dst)
         return self.member[(src, dst)]
+    def transform(self, src, dst):
+        self.get(src, dst)(src, dst)
     def __repr__(self):
         return 'Registry: ' + self.name + " " + str(self.member)

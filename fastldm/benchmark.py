@@ -2,8 +2,10 @@ import time
 import torch
 import numpy as np
 from tqdm import tqdm
+from contextlib import nullcontext
+from .helper import list_or_tuple
 
-def benchmark(model, inputs, kwargs, n_iter, func_name=None, warmup_step=5):
+def benchmark(model, inputs, kwargs, n_iter, func_name=None, warmup_step=5, use_autocast=False):
     if hasattr(model, 'eval') and callable(model.eval):
         model.eval()
         print('eval mode...')
@@ -19,14 +21,16 @@ def benchmark(model, inputs, kwargs, n_iter, func_name=None, warmup_step=5):
     print('start timing...')
     time_list = []
     with torch.no_grad():
-        for i in tqdm(range(n_iter)):
-            torch.cuda.synchronize()
-            start_time = time.time()
-            outputs = func(*inputs, **kwargs)
-            torch.cuda.synchronize()
-            end_time = time.time()
-            assert outputs is not None
-            time_list.append(end_time - start_time)
+        context = torch.autocast("cuda") if use_autocast else nullcontext()
+        with context:
+            for i in tqdm(range(n_iter)):
+                torch.cuda.synchronize()
+                start_time = time.time()
+                outputs = func(*inputs, **kwargs)
+                torch.cuda.synchronize()
+                end_time = time.time()
+                assert outputs is not None
+                time_list.append(end_time - start_time)
     times = np.array(time_list)
     measurements = {'average': times.mean(), 'min': times.min()}
     return measurements, outputs
@@ -38,6 +42,8 @@ from torch.testing._internal.common_utils import numpy_to_torch_dtype_dict
 def benchmark_trt(engine_path, inputs_dict, n_iter, warmup_step=5):
     engine = load_engine(engine_path)
     context = engine.create_execution_context()
+    if list_or_tuple(inputs_dict):
+        inputs_dict = {'input_{}'.format(i):x for i,x in enumerate(inputs_dict)}
     outputs_dict = {}
     bindings = []
     for binding in engine:

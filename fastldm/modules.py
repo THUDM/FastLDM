@@ -171,3 +171,10 @@ class TSModule(nn.Module):
         self.dim = dim
     def forward(self, timesteps):
         return timestep_embedding(timesteps, self.dim)
+
+class LinearConv(nn.Module):
+    def __init__(self, in_dim, out_dim):
+        super().__init__()
+        self.linear = nn.Linear(in_dim, out_dim)
+    def forward(self, x):
+        return self.linear(x.transpose(1, -1)).transpose(1, -1).contiguous()
