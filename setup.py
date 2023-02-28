@@ -9,5 +9,6 @@ setup(
         'torch',
         'numpy',
         'tqdm',
+        'flash-attn',
     ],
 )

@@ -163,14 +163,6 @@ class ldmSelfAttn(nn.Module):
         out = fMHA_V2.apply(qkv)
         out = rearrange(out, 'b n h d -> b n (h d)', h=h)
         return self.to_out(out)
-    
-from ldm.modules.diffusionmodules.util import timestep_embedding
-class TSModule(nn.Module):
-    def __init__(self, dim):
-        super().__init__()
-        self.dim = dim
-    def forward(self, timesteps):
-        return timestep_embedding(timesteps, self.dim)
 
 class LinearConv(nn.Module):
     def __init__(self, in_dim, out_dim):
@@ -178,3 +170,37 @@ class LinearConv(nn.Module):
         self.linear = nn.Linear(in_dim, out_dim)
     def forward(self, x):
         return self.linear(x.transpose(1, -1)).transpose(1, -1).contiguous()
+
+from .plugins import GroupNormalizationPlugin
+class GroupNorm(nn.Module):
+    def __init__(self, num_groups, num_channels, eps, affine=True):
+        super().__init__()
+        assert num_channels % num_channels == 0
+        self.eps = eps
+        self.num_groups = num_groups
+        self.weight = nn.Parameter(torch.ones(num_channels))
+        self.bias = nn.Parameter(torch.zeros(num_channels))
+    def forward(self, x):
+        return GroupNormalizationPlugin.apply(x, self.weight, self.bias, self.num_groups, self.eps)
+
+from .plugins import LayerNormPlugin
+class LayerNorm(nn.Module):
+    def __init__(self, channels, eps=1e-5):
+        super().__init__()
+        self.eps = eps
+        self.channels = channels
+        self.weight = nn.Parameter(torch.ones(channels))
+        self.bias = nn.Parameter(torch.zeros(channels))
+    def forward(self, x):
+        return LayerNormPlugin.apply(x, self.weight, self.bias, self.channels, self.eps)
+
+from .plugins import NewLayerNormPlugin
+class NewLayerNorm(nn.Module):
+    def __init__(self, channels, eps=1e-5):
+        super().__init__()
+        self.eps = eps
+        self.channels = channels
+        self.weight = nn.Parameter(torch.ones(channels))
+        self.bias = nn.Parameter(torch.zeros(channels))
+    def forward(self, x):
+        return NewLayerNormPlugin.apply(x, self.weight, self.bias, self.channels, self.eps)

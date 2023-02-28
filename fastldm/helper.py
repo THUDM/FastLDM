@@ -2,12 +2,19 @@ import os
 import torch
 import torch.nn as nn
 import tensorrt as trt
+import ctypes
+from collections import defaultdict
 
 def list_or_tuple(x):
     return isinstance(x, (list, tuple))
 
 TRT_LOGGER = trt.Logger()
 trt.init_libnvinfer_plugins(TRT_LOGGER, '')
+PLUGINS = []
+if 'PLUGINS' in os.environ:
+    for path in os.environ['PLUGINS'].split(','):
+        ctypes.cdll.LoadLibrary(path)
+        PLUGINS.append(path)
 
 def load_engine(engine_file_path):
     assert os.path.exists(engine_file_path)
@@ -16,8 +23,8 @@ def load_engine(engine_file_path):
         return runtime.deserialize_cuda_engine(f.read())
 
 from torch.testing._internal.common_utils import numpy_to_torch_dtype_dict
-def get_trt_stuff(engine_path):
-    engine = load_engine(engine_path)
+numpy_to_torch_dtype_dict[bool] = torch.bool
+def get_trt_stuff(engine):
     context = engine.create_execution_context()
     inputs_dict = {}
     outputs_dict = {}
@@ -35,35 +42,62 @@ def get_trt_stuff(engine_path):
             bindings.append(int(outputs_dict[binding].data_ptr()))
     return context, bindings, inputs_dict, outputs_dict
 
-def run_trt(context, bindings, stream=None):
-    if stream is None:
-        stream = torch.cuda.default_stream()
-    state = context.execute_async_v2(bindings=bindings, stream_handle=stream.cuda_stream)
-    stream.synchronize()
-    return state
-
 class TRTModule(nn.Module):
-    def __init__(self, engine_path):
+    def __init__(self, engine_path, num_worker):
         """
         Only support running engine on cuda:0 for now
         """
         super().__init__()
-        self.context, self.bindings, self.inputs_dict, self.outputs_dict = get_trt_stuff(engine_path)
+        self.num_worker = num_worker
+        self.engine = load_engine(engine_path)
+        self.context = []
+        self.bindings = []
+        self.inputs_dict = []
+        self.outputs_dict = []
+        self.stream = []
+        for i in range(num_worker):
+            context, bindings, inputs_dict, outputs_dict = get_trt_stuff(self.engine)
+            self.context.append(context)
+            self.bindings.append(bindings)
+            self.inputs_dict.append(inputs_dict)
+            self.outputs_dict.append(outputs_dict)
+            self.stream.append(torch.cuda.Stream(0))
+    def move_to_engine(self, inputs_h):
+        for i in range(self.num_worker):
+            for k in inputs_h:
+                self.inputs_dict[i][k].copy_(inputs_h[k][i])
+        torch.cuda.default_stream().synchronize()
+    def run_engine(self):
+        for context, bindings, stream in zip(self.context, self.bindings, self.stream):
+            state = context.execute_async_v2(bindings=bindings, stream_handle=stream.cuda_stream)
+            if not state:
+                raise Exception("trt engine execution failed")
+        for stream in self.stream:
+            stream.synchronize()
+    def merge_output(self):
+        final_outputs_dict = defaultdict(list)
+        for outputs_dict in self.outputs_dict:
+            for k in outputs_dict:
+                final_outputs_dict[k].append(outputs_dict[k])
+        for k in final_outputs_dict:
+            final_outputs_dict[k] = torch.cat(final_outputs_dict[k])
+        return final_outputs_dict
     def forward(self, *inputs, **kw_args):
+        inputs_h = {}
         device = 'cpu'
         for i, inp in enumerate(inputs):
-            self.inputs_dict['input_{}'.format(i)].copy_(inp)
+            inputs_h['input_{}'.format(i)] = torch.chunk(inp, self.num_worker)
             device = inp.device
         shift = len(inputs)
         for k in kw_args:
-            self.inputs_dict['input_{}'.format(shift)].copy_(kw_args[k])
+            inputs_h['input_{}'.format(shift)] = torch.chunk(kw_args[k], self.num_worker)
             shift += 1
-        state = run_trt(self.context, self.bindings)
-        if not state:
-            raise Exception("trt engine execution failed")
+        self.move_to_engine(inputs_h)
+        self.run_engine()
+        outputs_dict = self.merge_output()
         outputs = []
-        for i in range(len(self.outputs_dict)):
-            outputs.append(self.outputs_dict['output_{}'.format(i)].cpu().to(device))
+        for i in range(len(outputs_dict)):
+            outputs.append(outputs_dict['output_{}'.format(i)].cpu().to(device))
         if len(outputs) == 1:
             outputs = outputs[0]
         return outputs

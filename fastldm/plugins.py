@@ -1,7 +1,17 @@
 import torch
 import torch.nn.functional as F
 
-class CustomQKVToContextPluginDynamic(torch.autograd.Function):
+import os
+ONNX_ONLY = False if 'ONNX_ONLY' not in os.environ or not eval(os.environ['ONNX_ONLY']) else True
+
+class BaseApply:
+    @classmethod
+    def apply(cls, *inputs, **kw_args):
+        return cls.forward(None, *inputs, **kw_args)
+
+BasePlugin = BaseApply if ONNX_ONLY else torch.autograd.Function
+
+class CustomQKVToContextPluginDynamic(BasePlugin):
     @staticmethod
     def forward(ctx, qkv, hidden_size, num_heads, type_id):
         # Now I get qkv with shape (seq_len, batch_size, 3*hidden_size, 1, 1)
@@ -23,7 +33,7 @@ class CustomQKVToContextPluginDynamic(torch.autograd.Function):
     def symbolic(g, qkv, hidden_size, num_heads, type_id):
         return g.op("CustomQKVToContextPluginDynamic", qkv, plugin_version_s='1', type_id_i=type_id, hidden_size_i=hidden_size, num_heads_i=num_heads, has_mask_i=False)
 
-class fMHCA(torch.autograd.Function):
+class fMHCA(BasePlugin):
     @staticmethod
     def forward(ctx, q, kv):
         """
@@ -47,7 +57,7 @@ class fMHCA(torch.autograd.Function):
     def symbolic(g, q, kv):
         return g.op("fMHCA", q, kv, plugin_version_s='1')
 
-class fMHA_V2(torch.autograd.Function):
+class fMHA_V2(BasePlugin):
     @staticmethod
     def forward(ctx, qkv):
         """
@@ -69,3 +79,30 @@ class fMHA_V2(torch.autograd.Function):
     @staticmethod
     def symbolic(g, qkv):
         return g.op("fMHA_V2", qkv, plugin_version_s='1')
+
+class GroupNormalizationPlugin(BasePlugin):
+    @staticmethod
+    def forward(ctx, x, scale, bias, num_groups, eps):
+        return F.group_norm(x, num_groups, weight=scale, bias=bias, eps=eps)
+    @staticmethod
+    def symbolic(g, x, scale, bias, num_groups, eps):
+        return g.op("GroupNormalizationPlugin", x, scale, bias, plugin_version_s='1', eps_f=eps, num_groups_i=num_groups)
+
+class LayerNormPlugin(BasePlugin):
+    @staticmethod
+    def forward(ctx, x, scale, bias, channels, eps):
+        return F.layer_norm(x, [channels], scale, bias, eps)
+    @staticmethod
+    def symbolic(g, x, scale, bias, channels, eps):
+        return g.op("LayerNorm", x, scale, bias, plugin_version_s='1', epsilon_f=eps, axis_i=-1)
+
+class NewLayerNormPlugin(BasePlugin):
+    # https://github.com/1049451037/tensorrt-layernorm-plugin
+    @staticmethod
+    def forward(ctx, x, scale, bias, channels, eps):
+        return F.layer_norm(x, [channels], scale, bias, eps)
+    @staticmethod
+    def symbolic(g, x, scale, bias, channels, eps):
+        return g.op("LayerNormalizationPlugin", x, scale, bias, plugin_version_s='1', eps_f=eps)
+
+
