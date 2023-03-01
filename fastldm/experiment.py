@@ -5,15 +5,18 @@ import numpy as np
 from collections import OrderedDict
 import torch
 from .helper import ORTModule, TRTModule, list_or_tuple
-from .plugins import ONNX_ONLY
-from .helper import PLUGINS
+from .environ import ONNX_ONLY, PLUGINS
 
 PLUGIN_config = ' '.join(['--plugins={}'.format(p) for p in PLUGINS])
 
-def generate_trt(model, inputs, kw_args={}, experiment_name='', onnx_only=False, use_fp16=True):
+def generate_trt(model, inputs, kw_args={}, experiment_name='', onnx_only=False, use_fp16=True, skip=False):
     os.makedirs('./onnx/', exist_ok=True)
     os.makedirs('./trt/', exist_ok=True)
     name = '{}_ONNX_ONLY_{}_{}'.format(type(model).__name__, ONNX_ONLY, experiment_name)
+    if skip:
+        if onnx_only:
+            return 'onnx/{}.onnx'.format(name)
+        return 'onnx/{}.onnx'.format(name), 'trt/{}.trt'.format(name)
     model.eval()
     with torch.no_grad():
         outputs = model(*inputs, **kw_args)
@@ -68,9 +71,9 @@ def experiment_onnx(model, inputs, kw_args={}, new_inputs=None, new_kw_args=None
         new_kw_args = kw_args
     return experiment([model, ortmodel], [], new_inputs, kw_args=new_kw_args, n_iter=1, warm_up_step=0)
 
-def experiment_trt(model, inputs, kw_args={}, new_inputs=None, new_kw_args=None, use_fp16=True):
-    _, trt_path = generate_trt(model, inputs, kw_args=kw_args, use_fp16=use_fp16)
-    trtmodel = TRTModule(trt_path)
+def experiment_trt(model, inputs, kw_args={}, new_inputs=None, new_kw_args=None, use_fp16=True, skip=False):
+    _, trt_path = generate_trt(model, inputs, kw_args=kw_args, use_fp16=use_fp16, skip=skip)
+    trtmodel = TRTModule(trt_path, 1)
     if new_inputs is None:
         new_inputs = inputs
     if new_kw_args is None:

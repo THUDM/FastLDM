@@ -1,8 +1,6 @@
 import torch
 import torch.nn.functional as F
-
-import os
-ONNX_ONLY = False if 'ONNX_ONLY' not in os.environ or not eval(os.environ['ONNX_ONLY']) else True
+from .environ import ONNX_ONLY
 
 class BaseApply:
     @classmethod
@@ -12,6 +10,8 @@ class BaseApply:
 BasePlugin = BaseApply if ONNX_ONLY else torch.autograd.Function
 
 class CustomQKVToContextPluginDynamic(BasePlugin):
+    # https://github.com/NVIDIA/TensorRT/tree/release/8.5/plugin/bertQKVToContextPlugin
+    # Restriction of this plugin: https://github.com/NVIDIA/TensorRT/issues/2653
     @staticmethod
     def forward(ctx, qkv, hidden_size, num_heads, type_id):
         # Now I get qkv with shape (seq_len, batch_size, 3*hidden_size, 1, 1)
@@ -34,6 +34,8 @@ class CustomQKVToContextPluginDynamic(BasePlugin):
         return g.op("CustomQKVToContextPluginDynamic", qkv, plugin_version_s='1', type_id_i=type_id, hidden_size_i=hidden_size, num_heads_i=num_heads, has_mask_i=False)
 
 class fMHCA(BasePlugin):
+    # https://github.com/NVIDIA/TensorRT/tree/release/8.5/plugin/multiHeadCrossAttentionPlugin
+    # Potential issue of this plugin: https://github.com/NVIDIA/TensorRT/issues/2674
     @staticmethod
     def forward(ctx, q, kv):
         """
@@ -58,6 +60,7 @@ class fMHCA(BasePlugin):
         return g.op("fMHCA", q, kv, plugin_version_s='1')
 
 class fMHA_V2(BasePlugin):
+    # https://github.com/NVIDIA/TensorRT/tree/release/8.5/plugin/multiHeadFlashAttentionPlugin
     @staticmethod
     def forward(ctx, qkv):
         """
@@ -81,6 +84,7 @@ class fMHA_V2(BasePlugin):
         return g.op("fMHA_V2", qkv, plugin_version_s='1')
 
 class GroupNormalizationPlugin(BasePlugin):
+    # https://github.com/NVIDIA/TensorRT/tree/release/8.5/plugin/groupNormalizationPlugin
     @staticmethod
     def forward(ctx, x, scale, bias, num_groups, eps):
         return F.group_norm(x, num_groups, weight=scale, bias=bias, eps=eps)
@@ -89,6 +93,8 @@ class GroupNormalizationPlugin(BasePlugin):
         return g.op("GroupNormalizationPlugin", x, scale, bias, plugin_version_s='1', eps_f=eps, num_groups_i=num_groups)
 
 class LayerNormPlugin(BasePlugin):
+    # https://github.com/NVIDIA/TensorRT/tree/release/8.5/plugin/layerNormPlugin
+    # Potential issue of this plugin: https://github.com/NVIDIA/TensorRT/issues/2707
     @staticmethod
     def forward(ctx, x, scale, bias, channels, eps):
         return F.layer_norm(x, [channels], scale, bias, eps)

@@ -175,7 +175,7 @@ from .plugins import GroupNormalizationPlugin
 class GroupNorm(nn.Module):
     def __init__(self, num_groups, num_channels, eps, affine=True):
         super().__init__()
-        assert num_channels % num_channels == 0
+        assert num_channels % num_groups == 0
         self.eps = eps
         self.num_groups = num_groups
         self.weight = nn.Parameter(torch.ones(num_channels))

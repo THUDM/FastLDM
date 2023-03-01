@@ -14,14 +14,15 @@ def benchmark(model, inputs, kwargs, n_iter, func_name=None, warmup_step=5, use_
     else:
         func = model
     print('start warming up...')
+    context = torch.autocast("cuda") if use_autocast else nullcontext()
     with torch.no_grad():
-        for i in tqdm(range(warmup_step)):
-            outputs = func(*inputs, **kwargs)
-            assert outputs is not None
+        with context:
+            for i in tqdm(range(warmup_step)):
+                outputs = func(*inputs, **kwargs)
+                assert outputs is not None
     print('start timing...')
     time_list = []
     with torch.no_grad():
-        context = torch.autocast("cuda") if use_autocast else nullcontext()
         with context:
             for i in tqdm(range(n_iter)):
                 torch.cuda.synchronize()

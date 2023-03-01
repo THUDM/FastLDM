@@ -10,11 +10,9 @@ def list_or_tuple(x):
 
 TRT_LOGGER = trt.Logger()
 trt.init_libnvinfer_plugins(TRT_LOGGER, '')
-PLUGINS = []
-if 'PLUGINS' in os.environ:
-    for path in os.environ['PLUGINS'].split(','):
-        ctypes.cdll.LoadLibrary(path)
-        PLUGINS.append(path)
+from .environ import PLUGINS
+for path in PLUGINS:
+    ctypes.cdll.LoadLibrary(path)
 
 def load_engine(engine_file_path):
     assert os.path.exists(engine_file_path)
@@ -97,7 +95,7 @@ class TRTModule(nn.Module):
         outputs_dict = self.merge_output()
         outputs = []
         for i in range(len(outputs_dict)):
-            outputs.append(outputs_dict['output_{}'.format(i)].cpu().to(device))
+            outputs.append(outputs_dict['output_{}'.format(i)].to(device))
         if len(outputs) == 1:
             outputs = outputs[0]
         return outputs
