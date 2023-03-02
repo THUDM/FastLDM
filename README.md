@@ -18,7 +18,7 @@ The advantages of this repo are:
 
 More specifically, we provide:
 
-* parameter mapping functions from a module to another one in utils.mapping
+* parameter mapping functions from a module to another one in utils.mapping and utils.modifier
 * TensorRT-friendly modules in utils.plugins and utils.modules
 * benchmarking functions in utils.benchmark
 * experiment functions to compare different implemented models with same interface
@@ -29,4 +29,10 @@ We recommend to run scripts using CUDA_VISIBLE_DEVICES=0,1 (or any other devices
 
 ```
 pip install -e .
+```
+
+or
+
+```
+pip install git+https://github.com/THUDM/FastLDM.git
 ```

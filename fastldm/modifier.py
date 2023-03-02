@@ -7,13 +7,20 @@ MODIFIER = Registry('modifier')
 def modify(model, map_dict):
     if type(model) in map_dict:
         return MODIFIER.transform(model, map_dict[type(model)])
-    flag = True
     names = set()
+    cache = {}
+    for name, child in model.named_children():
+        if name not in names:
+            new_child = modify(child, map_dict)
+            cache[child] = new_child
+            setattr(model, name, new_child)
+            names.add(name)
+    flag = True
     while flag:
         flag = False
         for name, child in model.named_children():
             if name not in names:
-                setattr(model, name, modify(child, map_dict))
+                setattr(model, name, cache[child])
                 names.add(name)
                 flag = True
     return model
@@ -36,12 +43,6 @@ def modifier_qkv_linear(src_instance, dst_type):
 
 from .modules import GroupNorm
 @MODIFIER.register(torch.nn.GroupNorm, GroupNorm)
-def modifier_groupnorm(src_instance, dst_type):
-    dst_instance = dst_type(src_instance.num_groups, src_instance.num_channels, src_instance.eps)
-    return post_transform(src_instance, dst_instance)
-
-from ldm.modules.diffusionmodules.util import GroupNorm32
-@MODIFIER.register(GroupNorm32, GroupNorm)
 def modifier_groupnorm(src_instance, dst_type):
     dst_instance = dst_type(src_instance.num_groups, src_instance.num_channels, src_instance.eps)
     return post_transform(src_instance, dst_instance)
