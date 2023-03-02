@@ -4,14 +4,19 @@ from .mapping import MAPPING
 
 MODIFIER = Registry('modifier')
 
-def modify(model, map_dict):
+def modify(model, map_dict, name=None):
     if type(model) in map_dict:
-        return MODIFIER.transform(model, map_dict[type(model)])
+        if type(map_dict[type(model)]) is dict:
+            key = None if name not in map_dict[type(model)] else name
+            target = map_dict[type(model)][key]
+        else:
+            target = map_dict[type(model)]
+        return MODIFIER.transform(model, target)
     names = set()
     cache = {}
     for name, child in model.named_children():
         if name not in names:
-            new_child = modify(child, map_dict)
+            new_child = modify(child, map_dict, name=name)
             cache[child] = new_child
             setattr(model, name, new_child)
             names.add(name)
@@ -52,3 +57,6 @@ from .modules import NewLayerNorm
 def modifier_layernorm(src_instance, dst_type):
     dst_instance = dst_type(src_instance.normalized_shape[0], src_instance.eps)
     return post_transform(src_instance, dst_instance)
+
+from .modules import LayerNorm
+MODIFIER.register(torch.nn.LayerNorm, LayerNorm)(MODIFIER.get(torch.nn.LayerNorm, NewLayerNorm))
