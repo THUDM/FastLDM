@@ -129,10 +129,13 @@ class ORTModule(nn.Module):
 from collections import OrderedDict
 
 def profile_matrix(m):
+    old_m = m
+    m = torch.nan_to_num(m)
     mi = m.min()
     ma = m.max()
     mm = m.mean()
     profile = OrderedDict([
+        ("has_nan", not (old_m==m).all()),
         ("shape", m.shape),
         ("min", (mi, (m==mi).nonzero()[0])),
         ("max", (ma, (m==ma).nonzero()[0])),

@@ -6,6 +6,7 @@ from collections import OrderedDict
 import torch
 from .helper import ORTModule, TRTModule, list_or_tuple
 from .environ import ONNX_ONLY, PLUGINS
+from collections import Counter
 
 PLUGIN_config = ' '.join(['--plugins={}'.format(p) for p in PLUGINS])
 
@@ -29,18 +30,20 @@ def generate_trt(model, inputs, kw_args={}, experiment_name='', onnx_only=False,
     os.system("trtexec --onnx=onnx/{}.onnx --saveEngine=trt/{}.trt --buildOnly {} {}".format(name, name, '--fp16' if use_fp16 else '', PLUGIN_config))
     return 'onnx/{}.onnx'.format(name), 'trt/{}.trt'.format(name)
 
-def experiment(models, trt_models, inputs, kw_args={}, n_iter=100, warm_up_step=5):
+def experiment(models, trt_models, inputs, kw_args={}, n_iter=100, warm_up_step=5, forward_only=True, benchmark_func=benchmark):
     measure_dict = OrderedDict()
     outputs_dict = OrderedDict()
+    name_count = Counter()
     len_out = 0
     for model in models:
-        name = type(model).__name__
-        measure, outputs = benchmark(model, inputs, kw_args, n_iter, warmup_step=warm_up_step)
+        name = type(model).__name__ + str(name_count[type(model).__name__])
+        measure, outputs = benchmark_func(model, inputs, kw_args, n_iter, warmup_step=warm_up_step, forward_only=forward_only)
         if not list_or_tuple(outputs):
             outputs = [outputs]
         measure_dict[name] = measure
         outputs_dict[name] = outputs
         len_out = len(outputs)
+        name_count[type(model).__name__] += 1
     inputs_h = {'input_{}'.format(i): inputs[i] for i in range(len(inputs))}
     shift = len(inputs)
     for k in kw_args:

@@ -5,7 +5,7 @@ from tqdm import tqdm
 from contextlib import nullcontext
 from .helper import list_or_tuple
 
-def benchmark(model, inputs, kwargs, n_iter, func_name=None, warmup_step=5, use_autocast=False):
+def benchmark(model, inputs, kwargs, n_iter, func_name=None, warmup_step=5, use_autocast=False, forward_only=True):
     if hasattr(model, 'eval') and callable(model.eval):
         model.eval()
         print('eval mode...')
@@ -14,15 +14,16 @@ def benchmark(model, inputs, kwargs, n_iter, func_name=None, warmup_step=5, use_
     else:
         func = model
     print('start warming up...')
+    grad = torch.no_grad() if forward_only else nullcontext()
     context = torch.autocast("cuda") if use_autocast else nullcontext()
-    with torch.no_grad():
+    with grad:
         with context:
             for i in tqdm(range(warmup_step)):
                 outputs = func(*inputs, **kwargs)
                 assert outputs is not None
     print('start timing...')
     time_list = []
-    with torch.no_grad():
+    with grad:
         with context:
             for i in tqdm(range(n_iter)):
                 torch.cuda.synchronize()
@@ -35,6 +36,48 @@ def benchmark(model, inputs, kwargs, n_iter, func_name=None, warmup_step=5, use_
     times = np.array(time_list)
     measurements = {'average': times.mean(), 'min': times.min()}
     return measurements, outputs
+
+def benchmark_backward(model, inputs, kwargs, n_iter, func_name=None, warmup_step=5, use_autocast=False, forward_only=False):
+    if hasattr(model, 'eval') and callable(model.eval):
+        model.eval()
+        print('eval mode...')
+    if func_name is not None:
+        func = getattr(model, func_name)
+    else:
+        func = model
+    print('start warming up...')
+    grad = nullcontext()
+    context = torch.autocast("cuda") if use_autocast else nullcontext()
+    with grad:
+        with context:
+            for i in tqdm(range(warmup_step)):
+                func.zero_grad()
+                outputs = func(*inputs, **kwargs)
+                assert outputs is not None
+                if list_or_tuple(outputs):
+                    outputs = outputs[0]
+                loss = outputs.sum()
+                loss.backward()
+    print('start timing...')
+    time_list = []
+    with grad:
+        with context:
+            for i in tqdm(range(n_iter)):
+                func.zero_grad()
+                outputs = func(*inputs, **kwargs)
+                assert outputs is not None
+                if list_or_tuple(outputs):
+                    outputs = outputs[0]
+                loss = outputs.sum()
+                torch.cuda.synchronize()
+                start_time = time.time()
+                loss.backward()
+                torch.cuda.synchronize()
+                end_time = time.time()
+                time_list.append(end_time - start_time)
+    times = np.array(time_list)
+    measurements = {'average': times.mean(), 'min': times.min()}
+    return measurements, func.parameters().__next__().grad
 
 from .helper import get_trt_stuff
 from .helper import load_engine

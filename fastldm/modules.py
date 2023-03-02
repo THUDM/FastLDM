@@ -74,6 +74,57 @@ class FlashSelfAttn(nn.Module):
         out = torch.empty_like(v)
         return _flash_attn_forward(q, k, v, out, cu_seqlen, cu_seqlen, max_seqlen, max_seqlen, 0., self.scale, False, False)[0].view(seq_len, batch_size, self.hidden_size)
 
+from einops import rearrange
+from flash_attn.modules.mha import FlashSelfAttention
+class FlashSelfAttnWG(nn.Module):
+    def __init__(self, query_dim, heads=8, dim_head=64, dropout=0.):
+        super().__init__()
+        inner_dim = dim_head * heads
+        context_dim = query_dim
+
+        self.scale = dim_head ** -0.5
+        self.heads = heads
+
+        self.to_q = nn.Linear(query_dim, inner_dim, bias=False)
+        self.to_k = nn.Linear(context_dim, inner_dim, bias=False)
+        self.to_v = nn.Linear(context_dim, inner_dim, bias=False)
+
+        self.to_out = nn.Sequential(
+            nn.Linear(inner_dim, query_dim),
+            nn.Dropout(dropout)
+        )
+        self.flash = FlashSelfAttention(softmax_scale=self.scale)
+
+    def forward(self, x, context=None, mask=None, bias=None):
+        assert context is None and mask is None and bias is None
+        h = self.heads
+        context = x
+
+        inputx_shape = x.size()
+        if len(x.shape) == 3 and len(context.shape) == 3: # normal
+            pass
+        elif len(x.shape) == 4 and len(context.shape) == 3:
+            # BLOCK x but shared context for cross attention
+            x = rearrange(x, 'b k n d -> b (k n) d')
+        elif len(x.shape) == 4 and len(context.shape) == 4:
+            # BLOCK attention
+            assert x.shape[1] == context.shape[1], 'num of BLOCK not the same'
+            # b dim later will be "batch * nblk * nheads"
+            # assert not exists(mask) and not exists(bias), 'not implemented yet'
+        else:
+            raise ValueError(f'x shape: {x.shape} , context shape: {context.shape}')
+
+        q = self.to_q(x)
+        k = self.to_k(context)
+        v = self.to_v(context)
+
+        q, k, v = map(lambda t: rearrange(t, '... n (h d) -> (...) n h d', h=h), (q, k, v))
+
+        out = self.flash(torch.stack([q, k, v], dim=2))
+            
+        out = rearrange(out, 'b n h d -> b n (h d)', h=h).view(inputx_shape)
+        return self.to_out(out)
+
 from torch.nn import MultiheadAttention
 class TorchSelfAttn(nn.Module):
     def __init__(self, hidden_size, num_heads):

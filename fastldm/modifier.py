@@ -32,6 +32,8 @@ def modify(model, map_dict, name=None):
 
 @MODIFIER.register(type(None), type(None))
 def modifier_default(src_instance, dst_type):
+    if type(src_instance) is dst_type:
+        return src_instance
     raise Exception("Related modifier from {} to {} is not implemented yet".format(type(src_instance).__name__, dst_type.__name__))
 
 def post_transform(src_instance, dst_instance):
