@@ -111,4 +111,23 @@ class NewLayerNormPlugin(BasePlugin):
     def symbolic(g, x, scale, bias, channels, eps):
         return g.op("LayerNormalizationPlugin", x, scale, bias, plugin_version_s='1', eps_f=eps)
 
-
+class MHCAWG(BaseApply):
+    @staticmethod
+    def forward(ctx, q, kv, bias):
+        """
+        q: (batch_size, seq_len, num_head, size_per_head)
+        kv: (batch_size, seq_len, num_head, 2, size_per_head)
+        output: like q
+        """
+        size_per_head = q.size(3)
+        batch_size = q.size(0)
+        seq_len = q.size(1)
+        num_head = q.size(2)
+        q = q.transpose(1, 2).contiguous()
+        kv = kv.transpose(1, 2).contiguous()
+        k = kv.select(-2, 0)
+        v = kv.select(-2, 1)
+        scores = torch.matmul(q, k.transpose(-2, -1)) * (size_per_head**-0.5) + bias
+        scores = F.softmax(scores, -1)
+        result = torch.matmul(scores, v).transpose(1, 2).contiguous().view(batch_size, seq_len, num_head, size_per_head)
+        return result

@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from einops import rearrange
 
 class qkvLinearSlow(nn.Module):
     def __init__(self, hidden_size, num_heads):
@@ -74,7 +75,6 @@ class FlashSelfAttn(nn.Module):
         out = torch.empty_like(v)
         return _flash_attn_forward(q, k, v, out, cu_seqlen, cu_seqlen, max_seqlen, max_seqlen, 0., self.scale, False, False)[0].view(seq_len, batch_size, self.hidden_size)
 
-from einops import rearrange
 from flash_attn.modules.mha import FlashSelfAttention
 class FlashSelfAttnWG(nn.Module):
     def __init__(self, query_dim, heads=8, dim_head=64, dropout=0.):
@@ -125,6 +125,91 @@ class FlashSelfAttnWG(nn.Module):
         out = rearrange(out, 'b n h d -> b n (h d)', h=h).view(inputx_shape)
         return self.to_out(out)
 
+from flash_attn.flash_attn_triton import FlashAttnFunc
+class FlashCrossAttnWG(nn.Module):
+    def __init__(self, query_dim, context_dim=None, heads=8, dim_head=64, dropout=0.):
+        super().__init__()
+        inner_dim = dim_head * heads
+        assert context_dim is not None
+
+        self.scale = dim_head ** -0.5
+        self.heads = heads
+
+        self.to_q = nn.Linear(query_dim, inner_dim, bias=False)
+        self.to_k = nn.Linear(context_dim, inner_dim, bias=False)
+        self.to_v = nn.Linear(context_dim, inner_dim, bias=False)
+
+        self.to_out = nn.Sequential(
+            nn.Linear(inner_dim, query_dim),
+            nn.Dropout(dropout)
+        )
+
+    def forward(self, x, context=None, mask=None):
+        h = self.heads
+        assert context is not None
+
+        q = self.to_q(x)
+        k = self.to_k(context)
+        v = self.to_v(context)
+
+        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b n h d', h=h), (q, k, v))
+
+        sim = torch.zeros(q.shape[0], q.shape[2], q.shape[1], k.shape[1], dtype=q.dtype, device=q.device)
+        max_neg_value = -torch.finfo(sim.dtype).max / 2
+        sim = sim.masked_fill_(~mask, max_neg_value)
+        sim = sim.view(q.shape[0], q.shape[2], q.shape[1], k.shape[1])
+
+        out = FlashAttnFunc.apply(q, k, v, sim, False, self.scale)
+
+        out = rearrange(out, 'b n h d -> b n (h d)')
+        return self.to_out(out)
+
+from .plugins import MHCAWG
+class ldmCrossAttnWG(nn.Module):
+    def __init__(self, query_dim, context_dim=None, heads=8, dim_head=64, dropout=0.):
+        super().__init__()
+        inner_dim = dim_head * heads
+        assert context_dim is not None
+
+        self.scale = dim_head ** -0.5
+        self.heads = heads
+
+        self.to_q = nn.Linear(query_dim, inner_dim, bias=False)
+        self.to_k = nn.Linear(context_dim, inner_dim, bias=False)
+        self.to_v = nn.Linear(context_dim, inner_dim, bias=False)
+
+        self.to_out = nn.Sequential(
+            nn.Linear(inner_dim, query_dim),
+            nn.Dropout(dropout)
+        )
+
+    def forward(self, x, context=None, mask=None):
+        """
+        x: (batch_size, seq_len_q, query_dim)
+        context: (batch_size, seq_len_kv, context_dim)
+        out: (batch_size, seq_len, seq_len_q, query_dim)
+        """
+        h = self.heads
+
+        q = self.to_q(x)
+        assert context is not None
+        k = self.to_k(context)
+        v = self.to_v(context)
+
+        q = rearrange(q, 'b n (h d) -> b n h d', h=h)
+        k = rearrange(k, 'b n (h d) -> b n h 1 d', h=h)
+        v = rearrange(v, 'b n (h d) -> b n h 1 d', h=h)
+        kv = torch.cat([k, v], dim=-2)
+
+        sim = torch.zeros(q.shape[0], q.shape[2], q.shape[1], k.shape[1], dtype=q.dtype, device=q.device)
+        max_neg_value = -torch.finfo(sim.dtype).max / 2
+        sim = sim.masked_fill_(~mask, max_neg_value)
+        sim = sim.view(q.shape[0], q.shape[2], q.shape[1], k.shape[1])
+
+        out = MHCAWG.apply(q, kv, sim)
+        out = rearrange(out, 'b n h d -> b n (h d)', h=h)
+        return self.to_out(out)
+
 from torch.nn import MultiheadAttention
 class TorchSelfAttn(nn.Module):
     def __init__(self, hidden_size, num_heads):
@@ -134,7 +219,6 @@ class TorchSelfAttn(nn.Module):
         return self.mha(x, x, x)[0]
 
 from .plugins import fMHCA
-from einops import rearrange
 class ldmCrossAttn(nn.Module):
     def __init__(self, query_dim, context_dim=None, heads=8, dim_head=40):
         super().__init__()
@@ -175,7 +259,6 @@ class ldmCrossAttn(nn.Module):
         return self.to_out(out)
 
 from .plugins import fMHA_V2
-from einops import rearrange
 class ldmSelfAttn(nn.Module):
     def __init__(self, query_dim, context_dim=None, heads=8, dim_head=40):
         super().__init__()

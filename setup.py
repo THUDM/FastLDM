@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='fastldm',
-    version='0.2',
+    version='0.2.1',
     description='',
     packages=['fastldm'],
     install_requires=[
@@ -10,5 +10,6 @@ setup(
         'numpy',
         'tqdm',
         'flash-attn',
+        'triton'
     ],
 )
