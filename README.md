@@ -31,3 +31,7 @@ or
 ```
 pip install git+https://github.com/THUDM/FastLDM.git
 ```
+
+## Environment
+
+We reply on the docker environment `nvcr.io/nvidia/pytorch:22.12-py3`. (For newer version of TensorRT, this repo may not work because of removement of plugins.)
